@@ -1,0 +1,8 @@
+[
+  {
+    "Source": "jobsync.processor",
+    "DetailType": "JobSyncJobChanged",
+    "Detail": "{\"canonical_job_id\":\"4ef95ef00b5510ae\",\"change_type\":\"DESCRIPTION_CHANGED\",\"changed_fields\":[\"description\"],\"company\":\"AF Group\",\"title\":\"Senior Product Manager - Multiline (Remote US Residency)\",\"location\":\"United States\",\"status\":\"OPEN\",\"source_event_id\":\"business-rule-test-001\"}",
+    "EventBusName": "JobSyncBus"
+  }
+]

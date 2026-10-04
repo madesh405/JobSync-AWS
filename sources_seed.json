@@ -1,0 +1,85 @@
+{
+  "JobSync-Sources": [
+    {
+      "PutRequest": {
+        "Item": {
+          "source_id": {
+            "S": "himalayas"
+          },
+          "source_name": {
+            "S": "Himalayas"
+          },
+          "endpoint": {
+            "S": "https://himalayas.app/jobs/api?limit=20"
+          },
+          "crawl_interval": {
+            "N": "3600"
+          },
+          "change_count": {
+            "N": "0"
+          },
+          "failure_count": {
+            "N": "0"
+          },
+          "status": {
+            "S": "ACTIVE"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "source_id": {
+            "S": "jobicy"
+          },
+          "source_name": {
+            "S": "Jobicy"
+          },
+          "endpoint": {
+            "S": "https://jobicy.com/api/v2/remote-jobs?count=20"
+          },
+          "crawl_interval": {
+            "N": "3600"
+          },
+          "change_count": {
+            "N": "0"
+          },
+          "failure_count": {
+            "N": "0"
+          },
+          "status": {
+            "S": "ACTIVE"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "source_id": {
+            "S": "remoteok"
+          },
+          "source_name": {
+            "S": "Remote OK"
+          },
+          "endpoint": {
+            "S": "https://remoteok.com/api"
+          },
+          "crawl_interval": {
+            "N": "3600"
+          },
+          "change_count": {
+            "N": "0"
+          },
+          "failure_count": {
+            "N": "0"
+          },
+          "status": {
+            "S": "ACTIVE"
+          }
+        }
+      }
+    }
+  ]
+}

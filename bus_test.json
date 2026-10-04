@@ -1,0 +1,8 @@
+[
+  {
+    "Source": "job-sync.test",
+    "DetailType": "SynchronizationTest",
+    "Detail": "{\"message\":\"JobSync event bus test\",\"canonical_job_id\":\"TEST-BUS-001\"}",
+    "EventBusName": "JobSyncBus"
+  }
+]

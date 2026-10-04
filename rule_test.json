@@ -1,0 +1,8 @@
+[
+  {
+    "Source": "pipe JobSyncDynamoToBus",
+    "DetailType": "Event from aws:dynamodb",
+    "Detail": "{\"eventName\":\"MODIFY\",\"eventSource\":\"aws:dynamodb\",\"dynamodb\":{\"Keys\":{\"canonical_job_id\":{\"S\":\"RULE-TEST-001\"}}}}",
+    "EventBusName": "JobSyncBus"
+  }
+]

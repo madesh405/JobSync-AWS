@@ -1,0 +1,29 @@
+@"
+.venv/
+__pycache__/
+*.py[cod]
+
+# Node / Vite
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Local environment / secrets
+.env
+.env.*
+!.env.example
+
+# AWS credentials / sensitive local files
+.aws/
+*.pem
+key.json
+
+# Generated Lambda packages
+lambda_package/
+controller_package/
+api_package/
+*.zip
+
+# Generated test responses
+*_response.json
+"@ | Set-Content .gitignore
