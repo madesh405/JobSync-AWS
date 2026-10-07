@@ -1,12 +1,13 @@
 import hashlib
 import re
 import unicodedata
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 
 import requests
 from bs4 import BeautifulSoup
 
 TIMEOUT=20
+
 
 @dataclass
 class Job:
@@ -25,28 +26,115 @@ class Job:
     canonical_job_id:str=""
     content_hash:str=""
 
+
 def clean_text(value):
     if value is None:
         return ""
 
-    text=BeautifulSoup(str(value),"html.parser").get_text(" ",strip=True)
-    text=unicodedata.normalize("NFKC",text)
-    text=re.sub(r"\s+"," ",text)
+    text=BeautifulSoup(
+        str(value),
+        "html.parser"
+    ).get_text(
+        " ",
+        strip=True
+    )
+
+    text=unicodedata.normalize(
+        "NFKC",
+        text
+    )
+
+    text=re.sub(
+        r"\s+",
+        " ",
+        text
+    )
 
     return text.strip()
+
 
 def normalize_text(value):
     text=clean_text(value).lower()
 
-    text=text.replace("&"," and ")
+    text=text.replace(
+        "&",
+        " and "
+    )
 
-    text=re.sub(r"[^\w+#.]+"," ",text)
-    text=re.sub(r"\s+"," ",text)
+    text=re.sub(
+        r"[^\w+#.]+",
+        " ",
+        text
+    )
+
+    text=re.sub(
+        r"\s+",
+        " ",
+        text
+    )
 
     return text.strip()
 
+
 def normalize_company(value):
     return normalize_text(value)
+
+
+def normalize_employment_type(value):
+    text=clean_text(value).lower()
+
+    text=text.replace(
+        "-",
+        " "
+    )
+
+    text=text.replace(
+        "_",
+        " "
+    )
+
+    text=re.sub(
+        r"\s+",
+        " ",
+        text
+    )
+
+    if (
+        "full time" in text or
+        "fulltime" in text
+    ):
+        return "FULL_TIME"
+
+    if (
+        "part time" in text or
+        "parttime" in text
+    ):
+        return "PART_TIME"
+
+    if (
+        "contractor" in text or
+        "contract" in text or
+        "freelance" in text
+    ):
+        return "CONTRACT"
+
+    if (
+        "internship" in text or
+        "intern" in text
+    ):
+        return "INTERNSHIP"
+
+    if (
+        "temporary" in text or
+        re.search(
+            r"\btemp\b",
+            text
+        )
+    ):
+        return "TEMPORARY"
+
+    return "OTHER"
+
 
 def normalize_location(value):
     text=normalize_text(value)
@@ -59,9 +147,14 @@ def normalize_location(value):
     }
 
     for old,new in replacements.items():
-        text=re.sub(rf"\b{old}\b",new,text)
+        text=re.sub(
+            rf"\b{old}\b",
+            new,
+            text
+        )
 
     return text
+
 
 def normalize_title(value):
     text=normalize_text(value)
@@ -81,14 +174,29 @@ def normalize_title(value):
         "to"
     }
 
-    words=[x for x in words if x not in stop_words]
+    words=[
+        x
+        for x in words
+        if x not in stop_words
+    ]
 
-    return " ".join(sorted(words))
+    return " ".join(
+        sorted(words)
+    )
+
 
 def make_canonical_id(job):
-    company=normalize_company(job.company)
-    title=normalize_title(job.title)
-    location=normalize_location(job.location)
+    company=normalize_company(
+        job.company
+    )
+
+    title=normalize_title(
+        job.title
+    )
+
+    location=normalize_location(
+        job.location
+    )
 
     raw=f"{company}|{title}|{location}"
 
@@ -96,15 +204,26 @@ def make_canonical_id(job):
         raw.encode("utf-8")
     ).hexdigest()[:16]
 
+
 def make_content_hash(job):
     content={
-        "title":normalize_title(job.title),
-        "company":normalize_company(job.company),
-        "location":normalize_location(job.location),
-        "employment_type":normalize_text(job.employment_type),
+        "title":normalize_title(
+            job.title
+        ),
+        "company":normalize_company(
+            job.company
+        ),
+        "location":normalize_location(
+            job.location
+        ),
+        "employment_type":normalize_employment_type(
+            job.employment_type
+        ),
         "salary_min":job.salary_min,
         "salary_max":job.salary_max,
-        "description":normalize_text(job.description)
+        "description":normalize_text(
+            job.description
+        )
     }
 
     raw="|".join(
@@ -116,9 +235,19 @@ def make_content_hash(job):
         raw.encode("utf-8")
     ).hexdigest()
 
+
 def finalize_job(job):
-    job.canonical_job_id=make_canonical_id(job)
-    job.content_hash=make_content_hash(job)
+    job.employment_type=normalize_employment_type(
+        job.employment_type
+    )
+
+    job.canonical_job_id=make_canonical_id(
+        job
+    )
+
+    job.content_hash=make_content_hash(
+        job
+    )
 
     return job
 
@@ -130,7 +259,9 @@ def finalize_job(job):
 def get_himalayas():
     r=requests.get(
         "https://himalayas.app/jobs/api",
-        params={"limit":20},
+        params={
+            "limit":20
+        },
         timeout=TIMEOUT
     )
 
@@ -139,29 +270,74 @@ def get_himalayas():
     data=r.json()
     jobs=[]
 
-    for item in data.get("jobs",[]):
-        locations=item.get("locationRestrictions",[])
+    for item in data.get(
+        "jobs",
+        []
+    ):
+        locations=item.get(
+            "locationRestrictions",
+            []
+        )
 
-        if isinstance(locations,list):
-            location=", ".join(locations)
+        if isinstance(
+            locations,
+            list
+        ):
+            location=", ".join(
+                locations
+            )
         else:
-            location=str(locations or "")
+            location=str(
+                locations or ""
+            )
 
         job=Job(
             source="himalayas",
-            source_id=item.get("guid") or item.get("applicationLink",""),
-            title=clean_text(item.get("title")),
-            company=clean_text(item.get("companyName")),
-            location=clean_text(location),
-            employment_type=clean_text(item.get("employmentType")),
-            salary_min=item.get("minSalary"),
-            salary_max=item.get("maxSalary"),
-            description=clean_text(item.get("description")),
-            apply_url=item.get("applicationLink",""),
-            published_at=str(item.get("pubDate",""))
+            source_id=(
+                item.get("guid") or
+                item.get(
+                    "applicationLink",
+                    ""
+                )
+            ),
+            title=clean_text(
+                item.get("title")
+            ),
+            company=clean_text(
+                item.get("companyName")
+            ),
+            location=clean_text(
+                location
+            ),
+            employment_type=clean_text(
+                item.get(
+                    "employmentType"
+                )
+            ),
+            salary_min=item.get(
+                "minSalary"
+            ),
+            salary_max=item.get(
+                "maxSalary"
+            ),
+            description=clean_text(
+                item.get("description")
+            ),
+            apply_url=item.get(
+                "applicationLink",
+                ""
+            ),
+            published_at=str(
+                item.get(
+                    "pubDate",
+                    ""
+                )
+            )
         )
 
-        jobs.append(finalize_job(job))
+        jobs.append(
+            finalize_job(job)
+        )
 
     return jobs
 
@@ -173,7 +349,9 @@ def get_himalayas():
 def get_jobicy():
     r=requests.get(
         "https://jobicy.com/api/v2/remote-jobs",
-        params={"count":20},
+        params={
+            "count":20
+        },
         timeout=TIMEOUT
     )
 
@@ -182,32 +360,68 @@ def get_jobicy():
     data=r.json()
     jobs=[]
 
-    for item in data.get("jobs",[]):
+    for item in data.get(
+        "jobs",
+        []
+    ):
+        job_types=item.get(
+            "jobType",
+            []
+        )
 
-        job_types=item.get("jobType",[])
-
-        if isinstance(job_types,list):
+        if isinstance(
+            job_types,
+            list
+        ):
             employment_type=", ".join(
-                clean_text(x) for x in job_types
+                clean_text(x)
+                for x in job_types
             )
         else:
-            employment_type=clean_text(job_types)
+            employment_type=clean_text(
+                job_types
+            )
 
         job=Job(
             source="jobicy",
-            source_id=str(item.get("id","")),
-            title=clean_text(item.get("jobTitle")),
-            company=clean_text(item.get("companyName")),
-            location=clean_text(item.get("jobGeo")),
+            source_id=str(
+                item.get(
+                    "id",
+                    ""
+                )
+            ),
+            title=clean_text(
+                item.get("jobTitle")
+            ),
+            company=clean_text(
+                item.get("companyName")
+            ),
+            location=clean_text(
+                item.get("jobGeo")
+            ),
             employment_type=employment_type,
             salary_min=None,
             salary_max=None,
-            description=clean_text(item.get("jobDescription")),
-            apply_url=item.get("url",""),
-            published_at=str(item.get("pubDate",""))
+            description=clean_text(
+                item.get(
+                    "jobDescription"
+                )
+            ),
+            apply_url=item.get(
+                "url",
+                ""
+            ),
+            published_at=str(
+                item.get(
+                    "pubDate",
+                    ""
+                )
+            )
         )
 
-        jobs.append(finalize_job(job))
+        jobs.append(
+            finalize_job(job)
+        )
 
     return jobs
 
@@ -220,7 +434,8 @@ def get_remoteok():
     r=requests.get(
         "https://remoteok.com/api",
         headers={
-            "User-Agent":"JobSyncStudentProject/1.0"
+            "User-Agent":
+            "JobSyncStudentProject/1.0"
         },
         timeout=TIMEOUT
     )
@@ -232,48 +447,110 @@ def get_remoteok():
 
     for item in data:
 
-        if not isinstance(item,dict):
+        if not isinstance(
+            item,
+            dict
+        ):
             continue
 
         # Remote OK includes a metadata object.
         if "position" not in item:
             continue
 
-        tags=item.get("tags",[])
+        tags=item.get(
+            "tags",
+            []
+        )
 
-        if isinstance(tags,list):
+        if isinstance(
+            tags,
+            list
+        ):
             employment=[]
+
             for tag in tags:
-                tag=clean_text(tag).lower()
+                tag=clean_text(
+                    tag
+                ).lower()
 
                 if tag in {
                     "full time",
+                    "full-time",
                     "part time",
+                    "part-time",
                     "contract",
+                    "contractor",
                     "freelance",
-                    "internship"
+                    "internship",
+                    "intern",
+                    "temporary",
+                    "temp"
                 }:
-                    employment.append(tag)
+                    employment.append(
+                        tag
+                    )
 
-            employment_type=", ".join(employment)
+            employment_type=", ".join(
+                employment
+            )
         else:
             employment_type=""
 
         job=Job(
             source="remoteok",
-            source_id=str(item.get("id","")),
-            title=clean_text(item.get("position")),
-            company=clean_text(item.get("company")),
-            location=clean_text(item.get("location")),
+            source_id=str(
+                item.get(
+                    "id",
+                    ""
+                )
+            ),
+            title=clean_text(
+                item.get(
+                    "position"
+                )
+            ),
+            company=clean_text(
+                item.get(
+                    "company"
+                )
+            ),
+            location=clean_text(
+                item.get(
+                    "location"
+                )
+            ),
             employment_type=employment_type,
-            salary_min=item.get("salary_min"),
-            salary_max=item.get("salary_max"),
-            description=clean_text(item.get("description")),
-            apply_url=item.get("apply_url") or item.get("url",""),
-            published_at=str(item.get("date",""))
+            salary_min=item.get(
+                "salary_min"
+            ),
+            salary_max=item.get(
+                "salary_max"
+            ),
+            description=clean_text(
+                item.get(
+                    "description"
+                )
+            ),
+            apply_url=(
+                item.get(
+                    "apply_url"
+                ) or
+                item.get(
+                    "url",
+                    ""
+                )
+            ),
+            published_at=str(
+                item.get(
+                    "date",
+                    ""
+                )
+            )
         )
 
-        jobs.append(finalize_job(job))
+        jobs.append(
+            finalize_job(job)
+        )
 
     return jobs
 
@@ -285,42 +562,114 @@ def get_remoteok():
 def print_job(job):
 
     print("-"*60)
-    print("SOURCE:",job.source)
-    print("SOURCE ID:",job.source_id)
-    print("TITLE:",job.title)
-    print("COMPANY:",job.company)
-    print("LOCATION:",job.location)
-    print("TYPE:",job.employment_type)
-    print("SALARY:",job.salary_min,"-",job.salary_max)
-    print("CANONICAL ID:",job.canonical_job_id)
-    print("CONTENT HASH:",job.content_hash)
-    print("URL:",job.apply_url)
+    print(
+        "SOURCE:",
+        job.source
+    )
+
+    print(
+        "SOURCE ID:",
+        job.source_id
+    )
+
+    print(
+        "TITLE:",
+        job.title
+    )
+
+    print(
+        "COMPANY:",
+        job.company
+    )
+
+    print(
+        "LOCATION:",
+        job.location
+    )
+
+    print(
+        "TYPE:",
+        job.employment_type
+    )
+
+    print(
+        "SALARY:",
+        job.salary_min,
+        "-",
+        job.salary_max
+    )
+
+    print(
+        "CANONICAL ID:",
+        job.canonical_job_id
+    )
+
+    print(
+        "CONTENT HASH:",
+        job.content_hash
+    )
+
+    print(
+        "URL:",
+        job.apply_url
+    )
+
 
 def main():
 
     all_jobs=[]
 
-    print("\nFetching Himalayas...")
+    print(
+        "\nFetching Himalayas..."
+    )
+
     h=get_himalayas()
-    print("✅ Himalayas:",len(h))
+
+    print(
+        "✅ Himalayas:",
+        len(h)
+    )
+
     all_jobs.extend(h)
 
-    print("\nFetching Jobicy...")
+    print(
+        "\nFetching Jobicy..."
+    )
+
     j=get_jobicy()
-    print("✅ Jobicy:",len(j))
+
+    print(
+        "✅ Jobicy:",
+        len(j)
+    )
+
     all_jobs.extend(j)
 
-    print("\nFetching Remote OK...")
+    print(
+        "\nFetching Remote OK..."
+    )
+
     r=get_remoteok()
-    print("✅ Remote OK:",len(r))
+
+    print(
+        "✅ Remote OK:",
+        len(r)
+    )
+
     all_jobs.extend(r)
 
-    print("\nTOTAL RAW JOBS:",len(all_jobs))
+    print(
+        "\nTOTAL RAW JOBS:",
+        len(all_jobs)
+    )
 
-    print("\nFIRST 3 NORMALIZED JOBS:")
+    print(
+        "\nFIRST 3 NORMALIZED JOBS:"
+    )
 
     for job in all_jobs[:3]:
         print_job(job)
+
 
 if __name__=="__main__":
     main()

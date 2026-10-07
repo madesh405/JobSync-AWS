@@ -1,301 +1,349 @@
+import base64
 import json
-import boto3
 from decimal import Decimal
 
+import boto3
 
-REGION="us-east-1"
-
-JOBS_TABLE_NAME="JobSync-Jobs"
-SOURCES_TABLE_NAME="JobSync-Sources"
-
-
-dynamodb=boto3.resource(
-    "dynamodb",
-    region_name=REGION
-)
-
-jobs_table=dynamodb.Table(JOBS_TABLE_NAME)
-sources_table=dynamodb.Table(SOURCES_TABLE_NAME)
+REGION = "us-east-1"
+JOBS_TABLE = "JobSync-Jobs"
+SOURCES_TABLE = "JobSync-Sources"
 
 
-def decimal_default(value):
-    if isinstance(value,Decimal):
-        if value % 1 == 0:
-            return int(value)
-
-        return float(value)
-
-    raise TypeError(
-        f"Object of type {type(value).__name__} is not JSON serializable"
-    )
+dynamodb = boto3.resource("dynamodb", region_name=REGION)
+jobs_table = dynamodb.Table(JOBS_TABLE)
+sources_table = dynamodb.Table(SOURCES_TABLE)
 
 
-def response(status_code,body):
+def decimal_to_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def response(status_code, body):
     return {
-        "statusCode":status_code,
-        "headers":{
-            "Content-Type":"application/json",
-            "Access-Control-Allow-Origin":"*",
-            "Access-Control-Allow-Headers":"Content-Type",
-            "Access-Control-Allow-Methods":"GET,OPTIONS"
+        "statusCode": status_code,
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type",
+            "Access-Control-Allow-Methods": "GET,OPTIONS",
         },
-        "body":json.dumps(
-            body,
-            default=decimal_default
-        )
+        "body": json.dumps(body, default=str),
     }
 
 
-def get_job(job_id):
-    result=jobs_table.get_item(
-        Key={
-            "canonical_job_id":job_id
-        },
-        ConsistentRead=True
-    )
+def encode_token(last_evaluated_key):
+    if not last_evaluated_key:
+        return ""
 
-    item=result.get("Item")
+    raw = json.dumps(
+        last_evaluated_key,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
 
-    if item is None:
-        return response(
-            404,
-            {
-                "error":"Job not found",
-                "canonical_job_id":job_id
-            }
-        )
-
-    return response(
-        200,
-        {
-            "job":item
-        }
-    )
+    return base64.urlsafe_b64encode(raw).decode("utf-8")
 
 
-def get_jobs(event):
-    query=event.get("queryStringParameters") or {}
+def decode_token(token):
+    if not token:
+        return None
 
     try:
-        limit=int(
-            query.get("limit","20")
+        padding = "=" * (-len(token) % 4)
+        raw = base64.urlsafe_b64decode(
+            (token + padding).encode("utf-8")
         )
+        return json.loads(raw.decode("utf-8"))
+    except (ValueError, TypeError, json.JSONDecodeError):
+        raise ValueError("Invalid next_token.")
+
+
+def get_query_parameters(event):
+    parameters = event.get("queryStringParameters") or {}
+    return {
+        str(key): value
+        for key, value in parameters.items()
+    }
+
+
+def get_path_parameter(event, name):
+    path_parameters = event.get("pathParameters") or {}
+    return path_parameters.get(name)
+
+
+def get_route(event):
+    route_key = event.get("routeKey")
+    if route_key:
+        return route_key
+
+    request_context = event.get("requestContext") or {}
+    http = request_context.get("http") or {}
+    method = http.get("method") or event.get("httpMethod") or ""
+    path = event.get("rawPath") or event.get("path") or ""
+
+    return f"{method} {path}".strip()
+
+
+def list_jobs(event):
+    parameters = get_query_parameters(event)
+
+    try:
+        limit = int(parameters.get("limit", "100"))
     except ValueError:
-        limit=20
+        return response(400, {"message": "limit must be an integer."})
 
-    limit=max(
-        1,
-        min(limit,100)
-    )
+    limit = max(1, min(limit, 100))
 
-    source=query.get("source")
-    status=query.get("status")
-
-    response_data=jobs_table.scan(
-        Limit=limit
-    )
-
-    items=response_data.get("Items",[])
-
-    if source:
-        items=[
-            item
-            for item in items
-            if item.get("source")==source
-        ]
-
-    if status:
-        items=[
-            item
-            for item in items
-            if item.get("status")==status
-        ]
-
-    jobs=[]
-
-    for item in items:
-        jobs.append(
-            {
-                "canonical_job_id":item.get("canonical_job_id"),
-                "source":item.get("source"),
-                "source_id":item.get("source_id"),
-                "title":item.get("title"),
-                "company":item.get("company"),
-                "location":item.get("location"),
-                "employment_type":item.get("employment_type"),
-                "salary_min":item.get("salary_min"),
-                "salary_max":item.get("salary_max"),
-                "description":item.get("description"),
-                "apply_url":item.get("apply_url"),
-                "published_at":item.get("published_at"),
-                "first_seen":item.get("first_seen"),
-                "last_changed":item.get("last_changed"),
-                "status":item.get("status")
-            }
+    try:
+        exclusive_start_key = decode_token(
+            parameters.get("next_token", "")
         )
+    except ValueError as error:
+        return response(400, {"message": str(error)})
+
+    scan_arguments = {
+        "Limit": limit,
+    }
+
+    if exclusive_start_key:
+        scan_arguments["ExclusiveStartKey"] = exclusive_start_key
+
+    try:
+        result = jobs_table.scan(**scan_arguments)
+    except Exception as error:
+        print(f"Job scan failed: {error}")
+        return response(
+            500,
+            {"message": "Failed to load jobs."},
+        )
+
+    jobs = result.get("Items", [])
+
+    source_filter = parameters.get("source")
+    status_filter = parameters.get("status")
+
+    if source_filter:
+        jobs = [
+            job
+            for job in jobs
+            if str(job.get("source", "")).lower()
+            == str(source_filter).lower()
+        ]
+
+    if status_filter:
+        jobs = [
+            job
+            for job in jobs
+            if str(job.get("status", "")).lower()
+            == str(status_filter).lower()
+        ]
+
+    next_token = encode_token(
+        result.get("LastEvaluatedKey")
+    )
 
     return response(
         200,
         {
-            "count":len(jobs),
-            "jobs":jobs
-        }
+            "count": len(jobs),
+            "jobs": jobs,
+            "next_token": next_token or None,
+            "has_more": bool(next_token),
+        },
     )
+
+
+def get_single_job(event):
+    job_id = get_path_parameter(
+        event,
+        "canonical_job_id",
+    )
+
+    if not job_id:
+        return response(
+            400,
+            {"message": "canonical_job_id is required."},
+        )
+
+    try:
+        result = jobs_table.get_item(
+            Key={
+                "canonical_job_id": job_id,
+            }
+        )
+    except Exception as error:
+        print(f"Job lookup failed: {error}")
+        return response(
+            500,
+            {"message": "Failed to load job."},
+        )
+
+    job = result.get("Item")
+
+    if not job:
+        return response(
+            404,
+            {"message": "Job not found."},
+        )
+
+    return response(
+        200,
+        job,
+    )
+
+
+def get_source_value(item, *names):
+    for name in names:
+        if name in item:
+            return decimal_to_int(item.get(name))
+    return 0
+
+
+def build_source_metrics(item):
+    return {
+        "source_id": item.get("source_id"),
+        "source_name": item.get("name")
+        or item.get("source_name")
+        or item.get("source_id")
+        or "Unknown",
+        "status": item.get("status") or "UNKNOWN",
+        "fetch_attempts": get_source_value(
+            item,
+            "fetch_attempt_count",
+            "fetch_attempts",
+        ),
+        "successful_crawls": get_source_value(
+            item,
+            "successful_crawl_count",
+            "successful_crawls",
+        ),
+        "failed_crawls": get_source_value(
+            item,
+            "failed_crawl_count",
+            "failed_crawls",
+        ),
+        "new": get_source_value(
+            item,
+            "new_count",
+            "new",
+        ),
+        "unchanged": get_source_value(
+            item,
+            "unchanged_count",
+            "unchanged",
+        ),
+        "changed": get_source_value(
+            item,
+            "changed_count",
+            "changed",
+        ),
+        "cache_hits": get_source_value(
+            item,
+            "cache_hit_count",
+            "cache_hits",
+        ),
+        "cache_misses": get_source_value(
+            item,
+            "cache_miss_count",
+            "cache_misses",
+        ),
+        "redundant_updates_prevented": get_source_value(
+            item,
+            "redundant_updates_prevented",
+        ),
+        "controller_skips": get_source_value(
+            item,
+            "skip_count",
+            "controller_skips",
+        ),
+        "jobs_processed": get_source_value(
+            item,
+            "total_jobs_processed",
+            "jobs_processed",
+        ),
+    }
 
 
 def get_admin_metrics():
-    response_data=sources_table.scan()
+    items = []
+    response_data = sources_table.scan()
+    items.extend(response_data.get("Items", []))
 
-    sources=response_data.get("Items",[])
+    while response_data.get("LastEvaluatedKey"):
+        response_data = sources_table.scan(
+            ExclusiveStartKey=response_data["LastEvaluatedKey"]
+        )
+        items.extend(response_data.get("Items", []))
 
-    totals={
-        "sources":len(sources),
-        "fetch_attempts":0,
-        "successful_crawls":0,
-        "failed_crawls":0,
-        "new":0,
-        "unchanged":0,
-        "changed":0,
-        "cache_hits":0,
-        "cache_misses":0,
-        "controller_skips":0,
-        "redundant_updates_prevented":0,
-        "jobs_processed":0
+    source_metrics = [
+        build_source_metrics(item)
+        for item in items
+    ]
+
+    totals = {
+        "sources": len(source_metrics),
+        "fetch_attempts": 0,
+        "successful_crawls": 0,
+        "failed_crawls": 0,
+        "new": 0,
+        "unchanged": 0,
+        "changed": 0,
+        "cache_hits": 0,
+        "cache_misses": 0,
+        "redundant_updates_prevented": 0,
+        "controller_skips": 0,
+        "jobs_processed": 0,
     }
 
-    source_metrics=[]
-
-    for source in sources:
-        fetch_attempts=int(
-            source.get("fetch_attempt_count",0)
-        )
-
-        successful_crawls=int(
-            source.get("successful_crawl_count",0)
-        )
-
-        failed_crawls=int(
-            source.get("failed_crawl_count",0)
-        )
-
-        new_count=int(
-            source.get("new_count",0)
-        )
-
-        unchanged_count=int(
-            source.get("unchanged_count",0)
-        )
-
-        changed_count=int(
-            source.get("changed_count",0)
-        )
-
-        cache_hits=int(
-            source.get("cache_hit_count",0)
-        )
-
-        cache_misses=int(
-            source.get("cache_miss_count",0)
-        )
-
-        skip_count=int(
-            source.get("skip_count",0)
-        )
-
-        redundant_updates=int(
-            source.get("redundant_updates_prevented",0)
-        )
-
-        jobs_processed=int(
-            source.get("total_jobs_processed",0)
-        )
-
-        totals["fetch_attempts"]+=fetch_attempts
-        totals["successful_crawls"]+=successful_crawls
-        totals["failed_crawls"]+=failed_crawls
-        totals["new"]+=new_count
-        totals["unchanged"]+=unchanged_count
-        totals["changed"]+=changed_count
-        totals["cache_hits"]+=cache_hits
-        totals["cache_misses"]+=cache_misses
-        totals["controller_skips"]+=skip_count
-        totals["redundant_updates_prevented"]+=redundant_updates
-        totals["jobs_processed"]+=jobs_processed
-
-        source_metrics.append(
-            {
-                "source_id":source.get("source_id"),
-                "source_name":source.get("source_name"),
-                "status":source.get("status"),
-                "crawl_interval":source.get("crawl_interval"),
-                "next_check":source.get("next_check"),
-                "last_checked":source.get("last_checked"),
-                "last_crawl_started":source.get(
-                    "last_crawl_started"
-                ),
-                "last_crawl_completed":source.get(
-                    "last_crawl_completed"
-                ),
-                "last_fetched_count":source.get(
-                    "last_fetched_count",
-                    0
-                ),
-                "last_crawl_duration":source.get(
-                    "last_crawl_duration"
-                ),
-                "fetch_attempts":fetch_attempts,
-                "successful_crawls":successful_crawls,
-                "failed_crawls":failed_crawls,
-                "new":new_count,
-                "unchanged":unchanged_count,
-                "changed":changed_count,
-                "cache_hits":cache_hits,
-                "cache_misses":cache_misses,
-                "controller_skips":skip_count,
-                "redundant_updates_prevented":redundant_updates,
-                "jobs_processed":jobs_processed
-            }
-        )
+    for source in source_metrics:
+        for key in totals:
+            if key == "sources":
+                continue
+            totals[key] += decimal_to_int(source.get(key))
 
     return response(
         200,
         {
-            "metrics":totals,
-            "sources":source_metrics
-        }
+            "metrics": totals,
+            "sources": source_metrics,
+        },
     )
 
 
-def lambda_handler(event,context):
-    method=event.get("requestContext",{}).get(
-        "http",
-        {}
-    ).get(
-        "method"
+def lambda_handler(event, context):
+    route = get_route(event)
+    method = (
+        route.split(" ", 1)[0]
+        if " " in route
+        else event.get("httpMethod", "GET")
     )
 
-    if method=="OPTIONS":
-        return response(
-            200,
-            {
-                "message":"CORS preflight"
-            }
-        )
+    if method == "OPTIONS":
+        return response(200, {"ok": True})
 
-    raw_path=event.get("rawPath","")
+    path = event.get("rawPath") or event.get("path") or ""
 
-    if raw_path=="/admin/metrics":
+    if (
+        route == "GET /admin/metrics"
+        or path.endswith("/admin/metrics")
+    ):
         return get_admin_metrics()
 
-    path_parameters=event.get(
-        "pathParameters"
-    ) or {}
+    if (
+        get_path_parameter(
+            event,
+            "canonical_job_id",
+        )
+    ):
+        return get_single_job(event)
 
-    job_id=path_parameters.get(
-        "canonical_job_id"
+    if method == "GET":
+        return list_jobs(event)
+
+    return response(
+        405,
+        {"message": "Method not allowed."},
     )
-
-    if job_id:
-        return get_job(job_id)
-
-    return get_jobs(event)
