@@ -2,7 +2,11 @@ import json
 import time
 import boto3
 
-from source_state import get_all_sources,is_source_due
+from source_state import (
+    get_all_sources,
+    is_source_due,
+    record_source_skip
+)
 
 
 REGION="us-east-1"
@@ -71,6 +75,9 @@ def run_controller():
                 f"{source_name} | "
                 f"not due"
             )
+
+            record_source_skip(source_id)
+
             skipped+=1
             continue
 

@@ -4,7 +4,9 @@ from decimal import Decimal
 
 
 REGION="us-east-1"
-TABLE_NAME="JobSync-Jobs"
+
+JOBS_TABLE_NAME="JobSync-Jobs"
+SOURCES_TABLE_NAME="JobSync-Sources"
 
 
 dynamodb=boto3.resource(
@@ -12,7 +14,8 @@ dynamodb=boto3.resource(
     region_name=REGION
 )
 
-table=dynamodb.Table(TABLE_NAME)
+jobs_table=dynamodb.Table(JOBS_TABLE_NAME)
+sources_table=dynamodb.Table(SOURCES_TABLE_NAME)
 
 
 def decimal_default(value):
@@ -44,7 +47,7 @@ def response(status_code,body):
 
 
 def get_job(job_id):
-    result=table.get_item(
+    result=jobs_table.get_item(
         Key={
             "canonical_job_id":job_id
         },
@@ -88,7 +91,7 @@ def get_jobs(event):
     source=query.get("source")
     status=query.get("status")
 
-    response_data=table.scan(
+    response_data=jobs_table.scan(
         Limit=limit
     )
 
@@ -140,6 +143,129 @@ def get_jobs(event):
     )
 
 
+def get_admin_metrics():
+    response_data=sources_table.scan()
+
+    sources=response_data.get("Items",[])
+
+    totals={
+        "sources":len(sources),
+        "fetch_attempts":0,
+        "successful_crawls":0,
+        "failed_crawls":0,
+        "new":0,
+        "unchanged":0,
+        "changed":0,
+        "cache_hits":0,
+        "cache_misses":0,
+        "controller_skips":0,
+        "redundant_updates_prevented":0,
+        "jobs_processed":0
+    }
+
+    source_metrics=[]
+
+    for source in sources:
+        fetch_attempts=int(
+            source.get("fetch_attempt_count",0)
+        )
+
+        successful_crawls=int(
+            source.get("successful_crawl_count",0)
+        )
+
+        failed_crawls=int(
+            source.get("failed_crawl_count",0)
+        )
+
+        new_count=int(
+            source.get("new_count",0)
+        )
+
+        unchanged_count=int(
+            source.get("unchanged_count",0)
+        )
+
+        changed_count=int(
+            source.get("changed_count",0)
+        )
+
+        cache_hits=int(
+            source.get("cache_hit_count",0)
+        )
+
+        cache_misses=int(
+            source.get("cache_miss_count",0)
+        )
+
+        skip_count=int(
+            source.get("skip_count",0)
+        )
+
+        redundant_updates=int(
+            source.get("redundant_updates_prevented",0)
+        )
+
+        jobs_processed=int(
+            source.get("total_jobs_processed",0)
+        )
+
+        totals["fetch_attempts"]+=fetch_attempts
+        totals["successful_crawls"]+=successful_crawls
+        totals["failed_crawls"]+=failed_crawls
+        totals["new"]+=new_count
+        totals["unchanged"]+=unchanged_count
+        totals["changed"]+=changed_count
+        totals["cache_hits"]+=cache_hits
+        totals["cache_misses"]+=cache_misses
+        totals["controller_skips"]+=skip_count
+        totals["redundant_updates_prevented"]+=redundant_updates
+        totals["jobs_processed"]+=jobs_processed
+
+        source_metrics.append(
+            {
+                "source_id":source.get("source_id"),
+                "source_name":source.get("source_name"),
+                "status":source.get("status"),
+                "crawl_interval":source.get("crawl_interval"),
+                "next_check":source.get("next_check"),
+                "last_checked":source.get("last_checked"),
+                "last_crawl_started":source.get(
+                    "last_crawl_started"
+                ),
+                "last_crawl_completed":source.get(
+                    "last_crawl_completed"
+                ),
+                "last_fetched_count":source.get(
+                    "last_fetched_count",
+                    0
+                ),
+                "last_crawl_duration":source.get(
+                    "last_crawl_duration"
+                ),
+                "fetch_attempts":fetch_attempts,
+                "successful_crawls":successful_crawls,
+                "failed_crawls":failed_crawls,
+                "new":new_count,
+                "unchanged":unchanged_count,
+                "changed":changed_count,
+                "cache_hits":cache_hits,
+                "cache_misses":cache_misses,
+                "controller_skips":skip_count,
+                "redundant_updates_prevented":redundant_updates,
+                "jobs_processed":jobs_processed
+            }
+        )
+
+    return response(
+        200,
+        {
+            "metrics":totals,
+            "sources":source_metrics
+        }
+    )
+
+
 def lambda_handler(event,context):
     method=event.get("requestContext",{}).get(
         "http",
@@ -155,6 +281,11 @@ def lambda_handler(event,context):
                 "message":"CORS preflight"
             }
         )
+
+    raw_path=event.get("rawPath","")
+
+    if raw_path=="/admin/metrics":
+        return get_admin_metrics()
 
     path_parameters=event.get(
         "pathParameters"

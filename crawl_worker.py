@@ -1,5 +1,6 @@
 import json
 import sys
+import time
 
 from job_pipeline import (
     get_himalayas,
@@ -8,6 +9,12 @@ from job_pipeline import (
 )
 
 from sync_engine import sync_job
+
+from source_state import (
+    mark_crawl_start,
+    record_crawl_result,
+    mark_failure
+)
 
 
 SOURCE_FUNCTIONS={
@@ -29,41 +36,79 @@ def crawl_source(source_id):
     print(f"Source: {source_id}")
     print()
 
-    jobs=fetch_function()
+    crawl_started=False
+    start_time=time.time()
 
-    print(f"Fetched jobs: {len(jobs)}")
-    print()
+    try:
+        mark_crawl_start(source_id)
+        crawl_started=True
 
-    summary={
-        "NEW":0,
-        "UNCHANGED":0,
-        "CHANGED":0
-    }
+        jobs=fetch_function()
 
-    for index,job in enumerate(jobs,1):
-        result=sync_job(job)
+        print(f"Fetched jobs: {len(jobs)}")
+        print()
 
-        result_type=result.get("type")
+        summary={
+            "NEW":0,
+            "UNCHANGED":0,
+            "CHANGED":0
+        }
 
-        if result_type in summary:
-            summary[result_type]+=1
+        for index,job in enumerate(jobs,1):
+            result=sync_job(job)
 
-        print(
-            f"{index:03d}. "
-            f"{job.company} | "
-            f"{job.title} | "
-            f"{result_type}"
+            result_type=result.get("type")
+
+            if result_type in summary:
+                summary[result_type]+=1
+
+            print(
+                f"{index:03d}. "
+                f"{job.company} | "
+                f"{job.title} | "
+                f"{result_type}"
+            )
+
+        duration=time.time()-start_time
+
+        record_crawl_result(
+            source_id=source_id,
+            summary=summary,
+            fetched_count=len(jobs),
+            duration=duration
         )
 
-    print()
-    print("-"*60)
-    print("SUMMARY")
-    print("-"*60)
-    print(f"NEW: {summary['NEW']}")
-    print(f"UNCHANGED: {summary['UNCHANGED']}")
-    print(f"CHANGED: {summary['CHANGED']}")
+        print()
+        print("-"*60)
+        print("SUMMARY")
+        print("-"*60)
+        print(f"Fetched: {len(jobs)}")
+        print(f"NEW: {summary['NEW']}")
+        print(f"UNCHANGED: {summary['UNCHANGED']}")
+        print(f"CHANGED: {summary['CHANGED']}")
+        print(f"Cache hits: {summary['UNCHANGED']}")
+        print(
+            f"Cache misses: "
+            f"{summary['NEW']+summary['CHANGED']}"
+        )
+        print(
+            f"Duration: "
+            f"{duration:.2f} seconds"
+        )
 
-    return summary
+        return summary
+
+    except Exception as e:
+        if crawl_started:
+            try:
+                mark_failure(source_id)
+            except Exception as state_error:
+                print(
+                    f"WARNING: Failed to record crawl failure: "
+                    f"{state_error}"
+                )
+
+        raise e
 
 
 def lambda_style_event(event):
