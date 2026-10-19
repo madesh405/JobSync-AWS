@@ -29,6 +29,19 @@ class AdminSourceApiTests(unittest.TestCase):
             }
         }))
 
+    def test_admin_group_is_read_from_http_api_v1_claims(self):
+        event = {
+            "requestContext": {
+                "authorizer": {
+                    "claims": {
+                        "sub": "test-admin",
+                        "cognito:groups": '["JobSyncAdmins"]',
+                    }
+                }
+            }
+        }
+        self.assertTrue(api_lambda.is_admin(event))
+
     def test_admin_routes_are_detected(self):
         self.assertTrue(api_lambda.is_admin_route("GET /admin/metrics", "/admin/metrics"))
         self.assertTrue(api_lambda.is_admin_route("POST /admin/sources", "/admin/sources"))
