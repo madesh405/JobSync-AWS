@@ -19,6 +19,8 @@ SOURCES_TABLE = "JobSync-Sources"
 dynamodb = boto3.resource("dynamodb", region_name=REGION)
 jobs_table = dynamodb.Table(JOBS_TABLE)
 sources_table = dynamodb.Table(SOURCES_TABLE)
+sqs_client = boto3.client("sqs", region_name=REGION)
+CRAWL_QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/673396344578/JobSync-CrawlQueue"
 
 
 def decimal_to_int(value):
@@ -622,6 +624,41 @@ def test_admin_source(event):
         return response(502, {"message": "The API test failed."})
 
 
+def sync_admin_source(event):
+    source_id = get_path_parameter(event, "source_id")
+    if not source_id:
+        return response(400, {"message": "source_id is required."})
+    try:
+        source = sources_table.get_item(
+            Key={"source_id": source_id},
+            ConsistentRead=True,
+        ).get("Item")
+        if not source:
+            return response(404, {"message": "Source not found."})
+        if source.get("status") != "ACTIVE":
+            return response(409, {"message": "Only ACTIVE sources can be synced."})
+        now = int(time.time())
+        message = {
+            "source_id": source_id,
+            "reason": "MANUAL_SYNC",
+            "requested_at": now,
+            "requested_by": get_jwt_claims(event).get("sub", "admin"),
+        }
+        sent = sqs_client.send_message(
+            QueueUrl=CRAWL_QUEUE_URL,
+            MessageBody=json.dumps(message, separators=(",", ":")),
+        )
+        return response(202, {
+            "message": "Sync request queued.",
+            "source_id": source_id,
+            "message_id": sent.get("MessageId"),
+            "reason": "MANUAL_SYNC",
+        })
+    except Exception as error:
+        print(f"Manual source sync enqueue failed for {source_id}: {error}")
+        return response(500, {"message": "Could not queue this source for sync."})
+
+
 def update_admin_source(event):
     source_id = get_path_parameter(event, "source_id")
     if not source_id:
@@ -686,6 +723,9 @@ def lambda_handler(event, context):
 
     if route == "POST /admin/sources" or (method == "POST" and path.rstrip("/") == "/admin/sources"):
         return create_admin_source(event)
+
+    if method == "POST" and path.startswith("/admin/sources/") and path.endswith("/sync"):
+        return sync_admin_source(event)
 
     if method == "PATCH" and path.startswith("/admin/sources/"):
         return update_admin_source(event)
