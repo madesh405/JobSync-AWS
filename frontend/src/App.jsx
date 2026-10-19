@@ -1621,13 +1621,14 @@ async function fetchAdminMetrics() {
 
 
     if (!currentUserEmail) {
-
-
-
       return;
+    }
 
+    const session=getCurrentSession();
 
-
+    if (!session || !session.idToken) {
+      setMetricsError("Your session has expired. Please sign in again.");
+      return;
     }
 
 
@@ -1652,19 +1653,14 @@ async function fetchAdminMetrics() {
 
 
 
-      const response=
-
-
-
-        await fetch(
-
-
-
-          METRICS_URL
-
-
-
-        );
+      const response=await fetch(
+        METRICS_URL,
+        {
+          headers:{
+            Authorization:`Bearer ${session.idToken}`
+          }
+        }
+      );
 
 
 
