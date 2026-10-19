@@ -1236,3 +1236,45 @@ button {
     flex: 1;
   }
 }
+
+
+/* Browser-local saved jobs */
+.filter-summary {
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.saved-jobs-toggle,
+.save-job-button {
+  border: 1px solid #cbd3dd;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #334155;
+  padding: 9px 13px;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.saved-jobs-toggle:hover,
+.save-job-button:hover {
+  background: #eef1f5;
+}
+
+.saved-jobs-toggle.active,
+.save-job-button.saved {
+  border-color: #b9c9ed;
+  background: #edf3ff;
+  color: #214a9a;
+}
+
+@media (max-width: 560px) {
+  .card-footer {
+    flex-wrap: wrap;
+  }
+  .card-footer .save-job-button,
+  .card-footer .view-job-button {
+    flex: 1;
+  }
+}
