@@ -366,9 +366,12 @@ def is_admin(event):
             # bracketed, whitespace-separated text (for example,
             # "[JobSyncAdmins OtherGroup]"), which is not valid JSON.
             normalized = raw_groups.strip().strip("[]").strip()
+            normalized = raw_groups.strip().strip("[]").replace(",", " ").strip()
             groups = [
-                item.strip().strip('"').strip("'")
-                for item in re.split(r"[\\s,]+", normalized)
+                item.strip().strip('"').strip("\u0027")
+                for item in normalized.split()
+                if item.strip().strip('"').strip("\u0027")
+            ]
                 if item.strip().strip('"').strip("'")
             ]
 
