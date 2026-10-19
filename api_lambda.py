@@ -332,10 +332,19 @@ CUSTOM_FIELDS = {
 
 
 def get_jwt_claims(event):
+    """Read JWT claims from HTTP API v2 and v1 authorizer event shapes."""
     request_context = event.get("requestContext") or {}
     authorizer = request_context.get("authorizer") or {}
+
+    # HTTP API payload format 2.0 stores JWT claims under authorizer.jwt.
     jwt = authorizer.get("jwt") or {}
     claims = jwt.get("claims") or {}
+
+    # Payload format 1.0 exposes authorizer claims directly.
+    # Keep this fallback limited to API Gateway's trusted request context.
+    if not isinstance(claims, dict) or not claims:
+        claims = authorizer.get("claims") or {}
+
     return claims if isinstance(claims, dict) else {}
 
 
