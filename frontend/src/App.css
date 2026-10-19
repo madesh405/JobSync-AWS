@@ -1215,3 +1215,24 @@ button {
     flex: 1;
   }
 }
+
+
+.custom-source-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 560px) {
+  .custom-source-item-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .custom-source-item-actions button {
+    flex: 1;
+  }
+}
