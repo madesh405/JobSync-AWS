@@ -351,14 +351,27 @@ def get_jwt_claims(event):
 def is_admin(event):
     claims = get_jwt_claims(event)
     groups = claims.get("cognito:groups", [])
-    if isinstance(groups, str):
-        try:
-            parsed = json.loads(groups)
-            groups = parsed if isinstance(parsed, list) else [groups]
-        except (ValueError, TypeError):
-            groups = [groups]
-    return isinstance(groups, list) and ADMIN_GROUP in [str(item) for item in groups]
 
+    if isinstance(groups, str):
+        raw_groups = groups.strip()
+        try:
+            parsed = json.loads(raw_groups)
+        except (ValueError, TypeError):
+            parsed = None
+
+        if isinstance(parsed, list):
+            groups = parsed
+        else:
+            # HTTP API may expose array-valued claims as bracketed text,
+            # e.g. "[JobSyncAdmins]", which is not valid JSON.
+            normalized = raw_groups.strip().strip("[]").replace(",", " ").strip()
+            groups = [
+                item.strip().strip('"').strip("'")
+                for item in normalized.split()
+                if item.strip().strip('"').strip("'")
+            ]
+
+    return isinstance(groups, list) and ADMIN_GROUP in [str(item) for item in groups]
 
 def is_admin_route(route, path):
     route_path = path or ""
