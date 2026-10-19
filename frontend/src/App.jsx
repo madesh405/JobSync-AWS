@@ -35,6 +35,7 @@ import {
 
 
 const API_URL="https://cviwg4d4h2.execute-api.us-east-1.amazonaws.com/jobs";
+const SAVED_JOBS_KEY="jobsync_saved_job_ids";
 
 
 
@@ -511,6 +512,18 @@ function App() {
 
 
   const [jobs,setJobs]=useState([]);
+
+  const [savedJobIds,setSavedJobIds]=useState(()=>{
+    try {
+      const saved=JSON.parse(localStorage.getItem(SAVED_JOBS_KEY)||"[]");
+      return Array.isArray(saved) ? saved.filter(id=>typeof id==="string") : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [showSavedJobs,setShowSavedJobs]=useState(false);
+
 
 
 
@@ -1493,6 +1506,28 @@ function App() {
 
 
 
+  function getJobStorageId(job) {
+    return String(
+      job.canonical_job_id ||
+      job.job_id ||
+      job.apply_url ||
+      `${job.source||"job"}:${job.title||""}:${job.company||""}`
+    );
+  }
+
+  function toggleSavedJob(job) {
+    const id=getJobStorageId(job);
+    const next=savedJobIds.includes(id)
+      ? savedJobIds.filter(savedId=>savedId!==id)
+      : [...savedJobIds,id];
+    setSavedJobIds(next);
+    try {
+      localStorage.setItem(SAVED_JOBS_KEY,JSON.stringify(next));
+    } catch {
+      // Saving still works for this page session if browser storage is unavailable.
+    }
+  }
+
   function openJobDetails(job) {
 
 
@@ -2181,9 +2216,15 @@ async function fetchAdminMetrics() {
 
 
 
+        const matchesSaved=
+          !showSavedJobs ||
+          savedJobIds.includes(getJobStorageId(job));
+
         return (
 
 
+
+          matchesSaved &&
 
           matchesSearch &&
 
@@ -2237,9 +2278,11 @@ async function fetchAdminMetrics() {
 
 
 
-      employmentType
+      employmentType,
 
+      showSavedJobs,
 
+      savedJobIds
 
     ]);
 
@@ -3416,6 +3459,15 @@ async function fetchAdminMetrics() {
 
 
       <div className="filter-summary">
+        <button
+          type="button"
+          className={`saved-jobs-toggle ${showSavedJobs ? "active" : ""}`}
+          onClick={()=>setShowSavedJobs(current=>!current)}
+          aria-pressed={showSavedJobs}
+        >
+          {showSavedJobs ? "All jobs" : "Saved jobs"} ({savedJobIds.length})
+        </button>
+
 
 
 
@@ -3539,7 +3591,7 @@ async function fetchAdminMetrics() {
 
 
 
-            No jobs match your current filters.
+            {showSavedJobs ? "No saved jobs yet. Save a listing to find it here later." : "No jobs match your current filters."}
 
 
 
@@ -3838,6 +3890,15 @@ async function fetchAdminMetrics() {
 
 
 
+
+              <button
+                type="button"
+                className={`save-job-button ${savedJobIds.includes(getJobStorageId(job)) ? "saved" : ""}`}
+                onClick={()=>toggleSavedJob(job)}
+                aria-pressed={savedJobIds.includes(getJobStorageId(job))}
+              >
+                {savedJobIds.includes(getJobStorageId(job)) ? "★ Saved" : "☆ Save job"}
+              </button>
 
               <button
 
