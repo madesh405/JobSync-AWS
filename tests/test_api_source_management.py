@@ -86,5 +86,42 @@ class AdminSourceApiTests(unittest.TestCase):
                 })
 
 
+    @patch("api_lambda.sqs_client.send_message", return_value={"MessageId": "test-message"})
+    @patch("api_lambda.sources_table.get_item")
+    def test_manual_sync_enqueues_source(self, mocked_get, mocked_send):
+        mocked_get.return_value = {"Item": {
+            "source_id": "custom-example-ab12cd34",
+            "source_name": "Example",
+            "status": "ACTIVE",
+            "source_type": "CUSTOM_API",
+        }}
+        result = api_lambda.sync_admin_source({
+            "pathParameters": {"source_id": "custom-example-ab12cd34"},
+            "requestContext": {"authorizer": {"jwt": {"claims": {"sub": "admin-123"}}}},
+        })
+        self.assertEqual(result["statusCode"], 202)
+        mocked_send.assert_called_once()
+        message = mocked_send.call_args.kwargs["MessageBody"]
+        self.assertIn('"reason":"MANUAL_SYNC"', message)
+        self.assertIn('"source_id":"custom-example-ab12cd34"', message)
+
+    @patch("api_lambda.sqs_client.send_message")
+    @patch("api_lambda.sources_table.get_item")
+    def test_manual_sync_rejects_inactive_source(self, mocked_get, mocked_send):
+        mocked_get.return_value = {"Item": {
+            "source_id": "custom-example-ab12cd34",
+            "source_name": "Example",
+            "status": "DISABLED",
+            "source_type": "CUSTOM_API",
+        }}
+        result = api_lambda.sync_admin_source({
+            "pathParameters": {"source_id": "custom-example-ab12cd34"},
+            "requestContext": {},
+        })
+        self.assertEqual(result["statusCode"], 409)
+        mocked_send.assert_not_called()
+
+
+
 if __name__ == "__main__":
     unittest.main()
