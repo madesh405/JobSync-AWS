@@ -201,3 +201,47 @@ The main principle is:
 ## 👨‍💻 Repository
 
 https://github.com/madesh405/JobSync-AWS
+
+
+## 🔌 Custom API Sources
+
+The custom-source extension allows an administrator to register a public HTTPS JSON API without adding another hard-coded fetcher.
+
+Configuration includes:
+
+- Source name and HTTPS endpoint
+- JSON path to the jobs array, such as `data.jobs`
+- Field mappings for title, company, external ID, location, employment type, description, apply URL, salary, and publication date
+- Single-response or page-number pagination (up to 10 pages per run)
+- Crawl interval from 15 minutes to 24 hours
+- Source enable/disable controls
+- Manual Sync Now action that enqueues a source request on the existing SQS crawl queue
+
+New custom sources use the existing controller → SQS → crawl worker → DynamoDB pipeline. The worker normalizes the mapped jobs and uses the existing canonical-ID and content-hash logic.
+
+### Security boundaries
+
+- Admin endpoints require a Cognito JWT authorizer and membership in the `JobSyncAdmins` Cognito group.
+- The connector requires HTTPS, blocks redirects, limits response size and pagination, and rejects private or reserved endpoint addresses.
+- This initial connector supports unauthenticated APIs only. Do not put credentials in endpoint URLs; credentialed APIs will require a follow-up Secrets Manager integration.
+- Adding a source saves its configuration; the first actual synchronization occurs through the existing scheduler/controller flow.
+
+### Custom-source API
+
+~~~http
+GET   /admin/sources
+POST  /admin/sources/test
+POST  /admin/sources
+PATCH /admin/sources/{source_id}
+POST  /admin/sources/{source_id}/sync
+~~~
+
+All of these routes are administrator-only. The public job routes remain separate.
+
+## 📈 Operations and Recovery
+
+- CloudWatch dashboard: `JobSync-Operations`
+- Custom metric namespace: `JobSync/Operations`
+- Metrics include fetched/new/changed jobs, cache hits/misses, redundant writes prevented, crawl duration, successes, and failures.
+- `JobSync-CrawlDLQ` receives repeatedly failing SQS crawl messages after three unsuccessful receives.
+- `JobSync-DLQ-HasMessages` monitors messages waiting in the dead-letter queue.

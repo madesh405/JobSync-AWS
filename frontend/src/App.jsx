@@ -39,6 +39,8 @@ const API_URL="https://cviwg4d4h2.execute-api.us-east-1.amazonaws.com/jobs";
 
 
 const METRICS_URL="https://cviwg4d4h2.execute-api.us-east-1.amazonaws.com/admin/metrics";
+const SOURCES_URL="https://cviwg4d4h2.execute-api.us-east-1.amazonaws.com/admin/sources";
+const SOURCE_TEST_URL=SOURCES_URL + "/test";
 
 
 
@@ -594,6 +596,31 @@ function App() {
 
   const [metricsRefreshAt,setMetricsRefreshAt]=useState(null);
 
+  const [customSources,setCustomSources]=useState([]);
+  const [sourceManagementLoading,setSourceManagementLoading]=useState(false);
+  const [sourceManagementBusy,setSourceManagementBusy]=useState(false);
+  const [sourceManagementError,setSourceManagementError]=useState("");
+  const [sourceManagementMessage,setSourceManagementMessage]=useState("");
+  const [newSourceName,setNewSourceName]=useState("");
+  const [newSourceEndpoint,setNewSourceEndpoint]=useState("");
+  const [newSourceRecordsPath,setNewSourceRecordsPath]=useState("jobs");
+  const [newSourceTitlePath,setNewSourceTitlePath]=useState("title");
+  const [newSourceCompanyPath,setNewSourceCompanyPath]=useState("company");
+  const [newSourceIdPath,setNewSourceIdPath]=useState("id");
+  const [newSourceLocationPath,setNewSourceLocationPath]=useState("location");
+  const [newSourceEmploymentTypePath,setNewSourceEmploymentTypePath]=useState("employment_type");
+  const [newSourceDescriptionPath,setNewSourceDescriptionPath]=useState("description");
+  const [newSourceApplyUrlPath,setNewSourceApplyUrlPath]=useState("apply_url");
+  const [newSourceSalaryMinPath,setNewSourceSalaryMinPath]=useState("salary_min");
+  const [newSourceSalaryMaxPath,setNewSourceSalaryMaxPath]=useState("salary_max");
+  const [newSourcePublishedAtPath,setNewSourcePublishedAtPath]=useState("published_at");
+  const [newSourcePaginationType,setNewSourcePaginationType]=useState("NONE");
+  const [newSourcePageParameter,setNewSourcePageParameter]=useState("page");
+  const [newSourceStartPage,setNewSourceStartPage]=useState("1");
+  const [newSourceMaxPages,setNewSourceMaxPages]=useState("3");
+  const [newSourceInterval,setNewSourceInterval]=useState("3600");
+  const [sourceTestResult,setSourceTestResult]=useState(null);
+
 
 
 
@@ -781,25 +808,11 @@ function App() {
 
 
       fetchAdminMetrics();
-
-
-
+      fetchAdminSources();
     }
-
-
-
   },[
-
-
-
     view,
-
-
-
     currentUserEmail
-
-
-
   ]);
 
 
@@ -1775,6 +1788,162 @@ async function fetchAdminMetrics() {
 
 
 
+
+  function buildCustomSourcePayload() {
+    const fields = {
+      title:newSourceTitlePath.trim(),
+      company:newSourceCompanyPath.trim(),
+      source_id:newSourceIdPath.trim(),
+      location:newSourceLocationPath.trim(),
+      employment_type:newSourceEmploymentTypePath.trim(),
+      description:newSourceDescriptionPath.trim(),
+      apply_url:newSourceApplyUrlPath.trim(),
+      salary_min:newSourceSalaryMinPath.trim(),
+      salary_max:newSourceSalaryMaxPath.trim(),
+      published_at:newSourcePublishedAtPath.trim()
+    };
+    Object.keys(fields).forEach(key=>{
+      if (!fields[key]) delete fields[key];
+    });
+    return {
+      source_name:newSourceName.trim(),
+      endpoint:newSourceEndpoint.trim(),
+      records_path:newSourceRecordsPath.trim(),
+      fields,
+      pagination:{
+        type:newSourcePaginationType,
+        page_parameter:newSourcePageParameter.trim() || "page",
+        start_page:Number(newSourceStartPage),
+        max_pages:Number(newSourceMaxPages)
+      },
+      crawl_interval:Number(newSourceInterval)
+    };
+  }
+
+  async function adminApiRequest(url,options={}) {
+    const session=getCurrentSession();
+    if (!session || !session.idToken) {
+      throw new Error("Your session has expired. Sign in again.");
+    }
+    const response=await fetch(url,{
+      ...options,
+      headers:{
+        Authorization:"Bearer " + session.idToken,
+        ...(options.body ? {"Content-Type":"application/json"} : {}),
+        ...(options.headers || {})
+      }
+    });
+    let data={};
+    try { data=await response.json(); } catch { data={}; }
+    if (!response.ok) {
+      throw new Error(data.message || ("Admin request failed: " + response.status));
+    }
+    return data;
+  }
+
+  async function fetchAdminSources() {
+    if (!currentUserEmail) return;
+    try {
+      setSourceManagementLoading(true);
+      setSourceManagementError("");
+      const data=await adminApiRequest(SOURCES_URL);
+      setCustomSources(Array.isArray(data.sources) ? data.sources : []);
+    } catch (error) {
+      console.error(error);
+      setSourceManagementError(error.message || "Unable to load source configuration.");
+    } finally {
+      setSourceManagementLoading(false);
+    }
+  }
+
+  async function handleTestCustomSource() {
+    setSourceTestResult(null);
+    setSourceManagementMessage("");
+    setSourceManagementError("");
+    try {
+      setSourceManagementBusy(true);
+      const data=await adminApiRequest(SOURCE_TEST_URL,{
+        method:"POST",
+        body:JSON.stringify(buildCustomSourcePayload())
+      });
+      setSourceTestResult(data);
+      setSourceManagementMessage(
+        "Connection test succeeded. " + data.sample_count + " mapped sample job(s) found; nothing was saved."
+      );
+    } catch (error) {
+      console.error(error);
+      setSourceManagementError(error.message || "API connection test failed.");
+    } finally {
+      setSourceManagementBusy(false);
+    }
+  }
+
+  async function handleCreateCustomSource() {
+    setSourceTestResult(null);
+    setSourceManagementMessage("");
+    setSourceManagementError("");
+    try {
+      setSourceManagementBusy(true);
+      const payload=buildCustomSourcePayload();
+      const data=await adminApiRequest(SOURCES_URL,{
+        method:"POST",
+        body:JSON.stringify(payload)
+      });
+      setSourceManagementMessage(
+        'Source "' + (data.source?.source_name || payload.source_name) + '" was created. It will run through the existing crawl queue.'
+      );
+      await fetchAdminSources();
+    } catch (error) {
+      console.error(error);
+      setSourceManagementError(error.message || "Unable to create custom source.");
+    } finally {
+      setSourceManagementBusy(false);
+    }
+  }
+
+  async function handleManualSourceSync(item) {
+    setSourceManagementError("");
+    setSourceManagementMessage("");
+    try {
+      setSourceManagementBusy(true);
+      const data=await adminApiRequest(
+        SOURCES_URL + "/" + encodeURIComponent(item.source_id) + "/sync",
+        {method:"POST",body:JSON.stringify({})}
+      );
+      setSourceManagementMessage(
+        'Sync request queued for "' + item.source_name + '". The existing SQS worker will process it.'
+      );
+    } catch (error) {
+      console.error(error);
+      setSourceManagementError(error.message || "Unable to queue source sync.");
+    } finally {
+      setSourceManagementBusy(false);
+    }
+  }
+
+  async function handleToggleCustomSource(item) {
+    setSourceManagementError("");
+    setSourceManagementMessage("");
+    try {
+      setSourceManagementBusy(true);
+      const nextStatus=item.status==="ACTIVE" ? "DISABLED" : "ACTIVE";
+      const data=await adminApiRequest(
+        SOURCES_URL + "/" + encodeURIComponent(item.source_id),
+        {method:"PATCH",body:JSON.stringify({status:nextStatus})}
+      );
+      setCustomSources(items=>items.map(source=>
+        source.source_id===item.source_id ? data.source : source
+      ));
+      setSourceManagementMessage(
+        'Source "' + item.source_name + '" is now ' + nextStatus.toLowerCase() + "."
+      );
+    } catch (error) {
+      console.error(error);
+      setSourceManagementError(error.message || "Unable to update source status.");
+    } finally {
+      setSourceManagementBusy(false);
+    }
+  }
 
   async function handleRefresh() {
 
@@ -3841,6 +4010,182 @@ async function fetchAdminMetrics() {
 
 
 
+
+      <section className="panel custom-sources-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">SOURCE INTEGRATION</p>
+            <h3>Custom API sources</h3>
+            <p className="custom-source-intro">
+              Register a public HTTPS JSON API and map its response fields into the existing cache-aware crawl pipeline.
+            </p>
+          </div>
+          <button className="source-secondary-button" type="button" onClick={fetchAdminSources} disabled={sourceManagementLoading || sourceManagementBusy}>
+            {sourceManagementLoading ? "Loading..." : "Refresh sources"}
+          </button>
+        </div>
+        {sourceManagementError && (
+          <div className="message error custom-source-feedback">
+            <strong>Source management error</strong>
+            <span>{sourceManagementError}</span>
+          </div>
+        )}
+        {sourceManagementMessage && (
+          <div className="message custom-source-success">{sourceManagementMessage}</div>
+        )}
+        <div className="custom-source-form">
+          <label>
+            Source name
+            <input value={newSourceName} onChange={event=>setNewSourceName(event.target.value)} placeholder="Example: Company Careers" maxLength={80} />
+          </label>
+          <label className="custom-source-wide">
+            HTTPS JSON API endpoint
+            <input value={newSourceEndpoint} onChange={event=>setNewSourceEndpoint(event.target.value)} placeholder="https://api.example.com/jobs" type="url" />
+          </label>
+          <label>
+            Records path
+            <input value={newSourceRecordsPath} onChange={event=>setNewSourceRecordsPath(event.target.value)} placeholder="jobs" />
+            <small>Path to the jobs array, such as data.jobs</small>
+          </label>
+          <label>
+            Title field path
+            <input value={newSourceTitlePath} onChange={event=>setNewSourceTitlePath(event.target.value)} placeholder="title" required />
+          </label>
+          <label>
+            Company field path
+            <input value={newSourceCompanyPath} onChange={event=>setNewSourceCompanyPath(event.target.value)} placeholder="company" required />
+          </label>
+          <label>
+            External ID field path
+            <input value={newSourceIdPath} onChange={event=>setNewSourceIdPath(event.target.value)} placeholder="id" />
+          </label>
+          <label>
+            Location field path
+            <input value={newSourceLocationPath} onChange={event=>setNewSourceLocationPath(event.target.value)} placeholder="location" />
+          </label>
+          <label>
+            Employment type path
+            <input value={newSourceEmploymentTypePath} onChange={event=>setNewSourceEmploymentTypePath(event.target.value)} placeholder="employment_type" />
+          </label>
+          <label>
+            Description field path
+            <input value={newSourceDescriptionPath} onChange={event=>setNewSourceDescriptionPath(event.target.value)} placeholder="description" />
+          </label>
+          <label>
+            Apply URL field path
+            <input value={newSourceApplyUrlPath} onChange={event=>setNewSourceApplyUrlPath(event.target.value)} placeholder="apply_url" />
+          </label>
+          <label>
+            Salary minimum path
+            <input value={newSourceSalaryMinPath} onChange={event=>setNewSourceSalaryMinPath(event.target.value)} placeholder="salary_min" />
+          </label>
+          <label>
+            Salary maximum path
+            <input value={newSourceSalaryMaxPath} onChange={event=>setNewSourceSalaryMaxPath(event.target.value)} placeholder="salary_max" />
+          </label>
+          <label>
+            Publication date path
+            <input value={newSourcePublishedAtPath} onChange={event=>setNewSourcePublishedAtPath(event.target.value)} placeholder="published_at" />
+          </label>
+          <label>
+            Pagination
+            <select value={newSourcePaginationType} onChange={event=>setNewSourcePaginationType(event.target.value)}>
+              <option value="NONE">Single response</option>
+              <option value="PAGE">Page number</option>
+            </select>
+          </label>
+          {newSourcePaginationType==="PAGE" && (
+            <>
+              <label>
+                Page query parameter
+                <input value={newSourcePageParameter} onChange={event=>setNewSourcePageParameter(event.target.value)} placeholder="page" />
+              </label>
+              <label>
+                Start page
+                <input type="number" min="0" value={newSourceStartPage} onChange={event=>setNewSourceStartPage(event.target.value)} />
+              </label>
+              <label>
+                Maximum pages (1–10)
+                <input type="number" min="1" max="10" value={newSourceMaxPages} onChange={event=>setNewSourceMaxPages(event.target.value)} />
+              </label>
+            </>
+          )}
+          <label>
+            Crawl interval
+            <select value={newSourceInterval} onChange={event=>setNewSourceInterval(event.target.value)}>
+              <option value="900">Every 15 minutes</option>
+              <option value="3600">Every hour</option>
+              <option value="21600">Every 6 hours</option>
+              <option value="86400">Every 24 hours</option>
+            </select>
+          </label>
+        </div>
+        <div className="custom-source-actions">
+          <button type="button" className="source-secondary-button" onClick={handleTestCustomSource} disabled={sourceManagementBusy}>
+            {sourceManagementBusy ? "Working..." : "Test connection"}
+          </button>
+          <button type="button" className="source-primary-button" onClick={handleCreateCustomSource} disabled={sourceManagementBusy}>
+            {sourceManagementBusy ? "Working..." : "Save API source"}
+          </button>
+        </div>
+        {sourceTestResult && (
+          <div className="custom-source-preview">
+            <strong>Connection preview — {sourceTestResult.records_seen} record(s) inspected</strong>
+            {sourceTestResult.jobs?.length ? (
+              sourceTestResult.jobs.map((job,index)=>(
+                <div className="custom-source-preview-row" key={job.title + "-" + index}>
+                  <span>{job.title}</span>
+                  <small>{job.company}{job.location ? " · " + job.location : ""}</small>
+                </div>
+              ))
+            ) : (
+              <p>No records matched both configured title and company paths. Check the mappings.</p>
+            )}
+          </div>
+        )}
+        <div className="custom-source-list-heading">
+          <h4>Registered sources</h4>
+          <span>{customSources.length} source(s)</span>
+        </div>
+        {sourceManagementLoading && customSources.length===0 && <p className="custom-source-muted">Loading source configuration…</p>}
+        {!sourceManagementLoading && customSources.length===0 && <p className="custom-source-muted">No source configuration loaded.</p>}
+        <div className="custom-source-list">
+          {customSources.map(item=>(
+            <div className="custom-source-item" key={item.source_id}>
+              <div className="custom-source-item-copy">
+                <strong>{item.source_name}</strong>
+                <span>{item.source_id}</span>
+                {item.source_type==="CUSTOM_API" && item.endpoint && <small>{item.endpoint}</small>}
+                <small>
+                  {item.source_type==="CUSTOM_API" ? "Custom JSON API" : "Built-in connector"}
+                  {" · "}{item.status}
+                  {" · "}{formatNumber(item.crawl_interval)} sec interval
+                  {" · "}{formatNumber(item.successful_crawl_count)} successful
+                  {" · "}{formatNumber(item.failed_crawl_count)} failed
+                </small>
+              </div>
+              <div className="custom-source-item-actions">
+                <button
+                  type="button"
+                  className="source-secondary-button"
+                  onClick={()=>handleManualSourceSync(item)}
+                  disabled={sourceManagementBusy || item.status!=="ACTIVE"}
+                >
+                  Sync now
+                </button>
+                {item.source_type==="CUSTOM_API" && (
+                  <button type="button" className="source-secondary-button" onClick={()=>handleToggleCustomSource(item)} disabled={sourceManagementBusy}>
+                    {item.status==="ACTIVE" ? "Disable" : "Enable"}
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+        <p className="custom-source-footnote">
+          This first version supports unauthenticated public HTTPS JSON APIs. Do not put API keys in endpoint URLs. Custom sources run through the existing controller, SQS, Lambda, and DynamoDB workflow.
+        </p>
+      </section>
 
       {metricsError&&(
 
