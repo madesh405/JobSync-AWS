@@ -1901,6 +1901,26 @@ async function fetchAdminMetrics() {
     }
   }
 
+  async function handleManualSourceSync(item) {
+    setSourceManagementError("");
+    setSourceManagementMessage("");
+    try {
+      setSourceManagementBusy(true);
+      const data=await adminApiRequest(
+        SOURCES_URL + "/" + encodeURIComponent(item.source_id) + "/sync",
+        {method:"POST",body:JSON.stringify({})}
+      );
+      setSourceManagementMessage(
+        'Sync request queued for "' + item.source_name + '". The existing SQS worker will process it.'
+      );
+    } catch (error) {
+      console.error(error);
+      setSourceManagementError(error.message || "Unable to queue source sync.");
+    } finally {
+      setSourceManagementBusy(false);
+    }
+  }
+
   async function handleToggleCustomSource(item) {
     setSourceManagementError("");
     setSourceManagementMessage("");
@@ -4144,11 +4164,21 @@ async function fetchAdminMetrics() {
                   {" · "}{formatNumber(item.failed_crawl_count)} failed
                 </small>
               </div>
-              {item.source_type==="CUSTOM_API" && (
-                <button type="button" className="source-secondary-button" onClick={()=>handleToggleCustomSource(item)} disabled={sourceManagementBusy}>
-                  {item.status==="ACTIVE" ? "Disable" : "Enable"}
+              <div className="custom-source-item-actions">
+                <button
+                  type="button"
+                  className="source-secondary-button"
+                  onClick={()=>handleManualSourceSync(item)}
+                  disabled={sourceManagementBusy || item.status!=="ACTIVE"}
+                >
+                  Sync now
                 </button>
-              )}
+                {item.source_type==="CUSTOM_API" && (
+                  <button type="button" className="source-secondary-button" onClick={()=>handleToggleCustomSource(item)} disabled={sourceManagementBusy}>
+                    {item.status==="ACTIVE" ? "Disable" : "Enable"}
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>
