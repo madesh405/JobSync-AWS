@@ -215,6 +215,7 @@ Configuration includes:
 - Single-response or page-number pagination (up to 10 pages per run)
 - Crawl interval from 15 minutes to 24 hours
 - Source enable/disable controls
+- Manual Sync Now action that enqueues a source request on the existing SQS crawl queue
 
 New custom sources use the existing controller → SQS → crawl worker → DynamoDB pipeline. The worker normalizes the mapped jobs and uses the existing canonical-ID and content-hash logic.
 
@@ -232,6 +233,7 @@ GET   /admin/sources
 POST  /admin/sources/test
 POST  /admin/sources
 PATCH /admin/sources/{source_id}
+POST  /admin/sources/{source_id}/sync
 ~~~
 
 All of these routes are administrator-only. The public job routes remain separate.
