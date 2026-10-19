@@ -42,6 +42,45 @@ class AdminSourceApiTests(unittest.TestCase):
         }
         self.assertTrue(api_lambda.is_admin(event))
 
+    def test_admin_group_stringified_as_bracketed_list(self):
+        self.assertTrue(api_lambda.is_admin({
+            "requestContext": {
+                "authorizer": {
+                    "jwt": {
+                        "claims": {
+                            "cognito:groups": "[JobSyncAdmins]"
+                        }
+                    }
+                }
+            }
+        }))
+
+    def test_admin_group_stringified_with_multiple_groups(self):
+        self.assertTrue(api_lambda.is_admin({
+            "requestContext": {
+                "authorizer": {
+                    "jwt": {
+                        "claims": {
+                            "cognito:groups": "[OtherUsers JobSyncAdmins]"
+                        }
+                    }
+                }
+            }
+        }))
+
+    def test_non_admin_stringified_group_is_rejected(self):
+        self.assertFalse(api_lambda.is_admin({
+            "requestContext": {
+                "authorizer": {
+                    "jwt": {
+                        "claims": {
+                            "cognito:groups": "[OtherUsers]"
+                        }
+                    }
+                }
+            }
+        }))
+
     def test_admin_routes_are_detected(self):
         self.assertTrue(api_lambda.is_admin_route("GET /admin/metrics", "/admin/metrics"))
         self.assertTrue(api_lambda.is_admin_route("POST /admin/sources", "/admin/sources"))
